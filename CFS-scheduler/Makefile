@@ -15,6 +15,8 @@ OBJS = \
 	picirq.o\
 	pipe.o\
 	proc.o\
+	rbtree.o\
+	sched.o\
 	sleeplock.o\
 	spinlock.o\
 	string.o\
@@ -284,3 +286,12 @@ tar:
 	(cd /tmp; tar cf - xv6) | gzip >xv6-rev10.tar.gz  # the next one will be 10 (9/17)
 
 .PHONY: dist-test dist
+
+aso:
+	make clean
+	make
+	make fs.img
+	qemu-system-i386 -nographic -serial mon:stdio -hdb fs.img xv6.img -smp 1 -m 512
+boot:
+	make
+	qemu-system-i386 -nographic -serial mon:stdio -hdb fs.img xv6.img -smp 1 -m 512

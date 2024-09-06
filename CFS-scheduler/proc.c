@@ -15,8 +15,16 @@ struct {
 static struct proc *initproc;
 
 int nextpid = 1;
+int yct = 0;
 extern void forkret(void);
 extern void trapret(void);
+
+
+// sched.c
+extern void enqueue_entity_fair(struct cfs_rq*, struct sched_entity*);
+extern void dequeue_entity_fair(struct cfs_rq*, struct sched_entity*);
+extern struct sched_entity* pick_entity_fair(struct cfs_rq*);
+
 
 static void wakeup1(void *chan);
 
@@ -124,6 +132,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
+  init_entity(p);
   
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
@@ -148,8 +157,13 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
+  struct cfs_rq *cfs_rq = &mycpu()->cfs_rq;
+  cfs_rq->nr_running = 0;
+  cfs_rq->load.weight = 0;
+  cfs_rq->load.inv_weight = 0;
+  
   p->state = RUNNABLE;
-
+  enqueue_entity_fair(cfs_rq, &p->se);
   release(&ptable.lock);
 }
 
@@ -212,12 +226,17 @@ fork(void)
 
   pid = np->pid;
 
+  copy_entity(curproc, np);
+
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  struct sched_entity *nse = &np->se;
+  enqueue_entity_fair(nse->cfs_rq, nse);
 
   release(&ptable.lock);
 
+  cprintf("forked %d\n", pid);
   return pid;
 }
 
@@ -263,6 +282,12 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+
+  struct sched_entity *se = &curproc->se;
+  if(se->on_rq)
+	dequeue_entity_fair(se->cfs_rq, se);
+
+  cprintf("exit %d\n", curproc->pid);
   sched();
   panic("zombie exit");
 }
@@ -324,32 +349,28 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  struct cfs_rq *cfs_rq = &c->cfs_rq;
   c->proc = 0;
   
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+	p = next_proc(cfs_rq);
+	if(p && p->state == RUNNABLE) {
+	  c->proc = p;
+	  switchuvm(p);
+	  p->state = RUNNING;
+	  dequeue_entity_fair(cfs_rq, &p->se);
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+	  swtch(&(c->scheduler), p->context);
+	  switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
+	}
+	c->proc = 0;
+
     release(&ptable.lock);
 
   }
@@ -386,7 +407,12 @@ void
 yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
+  
   myproc()->state = RUNNABLE;
+
+  struct sched_entity *se = &myproc()->se;
+  enqueue_entity_fair(se->cfs_rq, se);
+  
   sched();
   release(&ptable.lock);
 }
@@ -439,6 +465,10 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
+  struct sched_entity *se = &p->se;
+  if(se->on_rq) 
+  	dequeue_entity_fair(se->cfs_rq, se);
+
   sched();
 
   // Tidy up.
@@ -460,8 +490,11 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
+	  struct sched_entity *se = &p->se;
+	  enqueue_entity_fair(se->cfs_rq, se);
+	}
 }
 
 // Wake up all processes sleeping on chan.
@@ -486,8 +519,11 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING) {
         p->state = RUNNABLE;
+		struct sched_entity *se = &p->se;
+		enqueue_entity_fair(se->cfs_rq, se);
+	  }
       release(&ptable.lock);
       return 0;
     }
@@ -532,3 +568,59 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+
+/* ----- sched_entity init/copy ----- */
+void
+init_entity(struct proc *p)
+{
+  struct sched_entity *se = &p->se;
+
+  se->load.weight = prio_to_weight[0+20];
+  se->load.inv_weight = prio_to_wmult[0+20];
+
+  se->run_node.__rb_parent_color = 0;
+  se->run_node.rb_right = 0;
+  se->run_node.rb_left = 0;
+
+  se->exec_start = 0;
+  se->sum_exec_runtime = 0;
+  se->vruntime = 0;
+  se->tot_exec_runtime = 0;
+}
+
+
+void
+copy_entity(struct proc *parent, struct proc *child)
+{
+  struct sched_entity *pse = &parent->se;
+  struct sched_entity *cse = &child->se;
+  struct cfs_rq *cfs_rq = pse->cfs_rq;
+
+  cse->load.weight = pse->load.weight;
+  cse->load.inv_weight = pse->load.inv_weight;
+  cse->cfs_rq = cfs_rq; // affinity?
+
+  // Execute forked-child first
+  cse->vruntime = cfs_rq->min_vruntime;
+  cse->tot_exec_runtime = 0;
+}
+
+
+struct proc*
+next_proc(struct cfs_rq *cfs_rq)
+{
+  struct sched_entity *nse = 0;
+  nse = pick_entity_fair(cfs_rq);
+
+  if(!nse) return 0;
+
+  struct proc *p = proc_entry(nse, struct proc, se);
+  
+  // init sum_exec_time of entity
+  nse->exec_start = us;
+  nse->sum_exec_runtime = 0;
+  
+  return p;
+}
+  

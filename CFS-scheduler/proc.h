@@ -1,7 +1,17 @@
+#ifndef PROC_H
+# define PROC_H
+// proc.h
+# include "sched.h"
+
+# define proc_entry(ptr, type, member) \
+  					container_of(ptr, type, member)
+
 // Per-CPU state
 struct cpu {
   uchar apicid;                // Local APIC ID
   struct context *scheduler;   // swtch() here to enter scheduler
+  struct cfs_rq cfs_rq;		   // CFS run queue
+
   struct taskstate ts;         // Used by x86 to find stack for interrupt
   struct segdesc gdt[NSEGS];   // x86 global descriptor table
   volatile uint started;       // Has the CPU started?
@@ -34,25 +44,35 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+
 // Per-process state
 struct proc {
+// Per-thread info
+  enum procstate state;		   // Process state
+  char *kstack;				   // Bottom of kernel stack
+  struct trapframe *tf;		   // Trap frame for current syscall
+  struct context *context;	   // swtch() here to run process
+  void *chan;				   // If non-zero, sleeping on chan
+  //uint usp;				   // User stack pointer
+
+// Shared data info
   uint sz;                     // Size of process memory (bytes)
   pde_t* pgdir;                // Page table
-  char *kstack;                // Bottom of kernel stack for this process
-  enum procstate state;        // Process state
   int pid;                     // Process ID
   struct proc *parent;         // Parent process
-  struct trapframe *tf;        // Trap frame for current syscall
-  struct context *context;     // swtch() here to run process
-  void *chan;                  // If non-zero, sleeping on chan
   int killed;                  // If non-zero, have been killed
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+// sched entity info
+  struct sched_entity se;
 };
+
 
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+#endif

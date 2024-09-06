@@ -1,0 +1,3 @@
+struct tmp {
+  int x;
+};

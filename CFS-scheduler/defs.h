@@ -9,6 +9,8 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct rb_root;
+struct cfs_rq;
 
 // bio.c
 void            binit(void);
@@ -120,6 +122,9 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+void			init_entity(struct proc*);
+void			copy_entity(struct proc*, struct proc*);
+struct proc*	next_proc(struct cfs_rq*);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -161,7 +166,8 @@ void            timerinit(void);
 
 // trap.c
 void            idtinit(void);
-extern uint     ticks;
+extern uint		ticks;
+extern u64		us;
 void            tvinit(void);
 extern struct spinlock tickslock;
 
