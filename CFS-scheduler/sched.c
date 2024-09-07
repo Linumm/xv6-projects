@@ -80,7 +80,6 @@ dequeue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
   cfs_rq->load.weight -= se->load.weight;
   cfs_rq->load.inv_weight -= se->load.inv_weight;
   cfs_rq->leftmost = rb_leftmost(root);
-  //cprintf("deq %d\n", cfs_rq->nr_running);
 }
 
 
@@ -221,6 +220,7 @@ check_yield(struct cfs_rq *cfs_rq)
 	return 0;
 
   u64 ideal_runtime = calc_slice(cfs_rq, curr);
+  //cprintf("ideal_runtime: %d / %d\n", ideal_runtime, cfs_rq->nr_running);
  
   /* if runtime over ideal runtime, yield */
   if(runtime >= ideal_runtime)
@@ -229,8 +229,13 @@ check_yield(struct cfs_rq *cfs_rq)
   struct sched_entity *leftmost = pick_entity_fair(cfs_rq);
   u64 delta_vruntime = curr->vruntime - leftmost->vruntime;
 
-  if(delta_vruntime > ideal_runtime)
+  /* if leftmost vruntime is smaller, yield */
+  if(delta_vruntime > 0)
 	return 1;
+
+
+  //if(delta_vruntime > ideal_runtime)
+	//return 1;
 
   return 0;
 }

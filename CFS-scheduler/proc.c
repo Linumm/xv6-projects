@@ -231,12 +231,13 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+
   struct sched_entity *nse = &np->se;
   enqueue_entity_fair(nse->cfs_rq, nse);
+  //cprintf("[fork] nr: %d\n", nse->cfs_rq->nr_running);
 
   release(&ptable.lock);
 
-  cprintf("forked %d\n", pid);
   return pid;
 }
 
@@ -286,8 +287,8 @@ exit(void)
   struct sched_entity *se = &curproc->se;
   if(se->on_rq)
 	dequeue_entity_fair(se->cfs_rq, se);
+  cprintf("[exit] pid: %d, t: %d\n", curproc->pid, se->tot_exec_runtime);
 
-  cprintf("exit %d\n", curproc->pid);
   sched();
   panic("zombie exit");
 }
@@ -350,6 +351,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   struct cfs_rq *cfs_rq = &c->cfs_rq;
+
   c->proc = 0;
   
   for(;;){
@@ -363,6 +365,8 @@ scheduler(void)
 	  c->proc = p;
 	  switchuvm(p);
 	  p->state = RUNNING;
+
+	  cfs_rq->curr = &p->se;
 	  dequeue_entity_fair(cfs_rq, &p->se);
 
 	  swtch(&(c->scheduler), p->context);
@@ -370,6 +374,7 @@ scheduler(void)
 
 	}
 	c->proc = 0;
+	cfs_rq->curr = 0;
 
     release(&ptable.lock);
 
@@ -602,6 +607,8 @@ copy_entity(struct proc *parent, struct proc *child)
   cse->cfs_rq = cfs_rq; // affinity?
 
   // Execute forked-child first
+  cse->exec_start = 0;
+  cse->sum_exec_runtime = 0;
   cse->vruntime = cfs_rq->min_vruntime;
   cse->tot_exec_runtime = 0;
 }

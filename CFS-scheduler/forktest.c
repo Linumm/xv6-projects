@@ -7,6 +7,8 @@
 
 #define N 1000
 
+int j=0;
+
 void
 printf(int fd, const char *s, ...)
 {
@@ -24,8 +26,9 @@ forktest(void)
     pid = fork();
     if(pid < 0)
       break;
-    if(pid == 0)
-      exit();
+    if(pid == 0){
+	  exit();
+	}
   }
 
   if(n == N){
