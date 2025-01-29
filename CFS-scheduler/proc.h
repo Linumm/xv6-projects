@@ -1,7 +1,8 @@
 #ifndef PROC_H
 # define PROC_H
 // proc.h
-# include "sched.h"
+#include "sched.h"
+
 
 # define proc_entry(ptr, type, member) \
   					container_of(ptr, type, member)
@@ -10,7 +11,7 @@
 struct cpu {
   uchar apicid;                // Local APIC ID
   struct context *scheduler;   // swtch() here to enter scheduler
-  struct cfs_rq cfs_rq;		   // CFS run queue
+  //struct cfs_rq cfs_rq;		   // CFS run queue
 
   struct taskstate ts;         // Used by x86 to find stack for interrupt
   struct segdesc gdt[NSEGS];   // x86 global descriptor table

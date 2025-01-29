@@ -9,8 +9,14 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+
+// rbtree.h
 struct rb_root;
+struct rb_node;
+// sched.h
+struct load_weight;
 struct cfs_rq;
+struct sched_entity;
 
 // bio.c
 void            binit(void);
@@ -122,9 +128,23 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
-void			init_entity(struct proc*);
-void			copy_entity(struct proc*, struct proc*);
-struct proc*	next_proc(struct cfs_rq*);
+/* ----- My Def -----*/
+void            check_tick(struct proc*, u64);
+struct proc*	  next_proc(struct cfs_rq*);
+int             getnice(void);
+int             setnice(int);
+int             forknice(int);
+
+// sched.c
+void            init_cfs_rq(struct cfs_rq*);
+void            enqueue_entity_fair(struct cfs_rq*, struct sched_entity*);
+void            dequeue_entity_fair(struct cfs_rq*, struct sched_entity*);
+struct sched_entity* pick_entity_fair(struct cfs_rq*);
+void			      init_entity(struct sched_entity*);
+void			      copy_entity(struct sched_entity*, struct sched_entity*);
+void            reset_entity(struct sched_entity*, u64);
+int             get_nice_entity(struct sched_entity*);
+void            set_nice_entity(struct sched_entity*, int);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

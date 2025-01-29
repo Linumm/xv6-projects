@@ -3,6 +3,7 @@
 
 // rbtree.h
 # include "macro.h"
+# include "types.h"
 
 # define RB_RED		0
 # define RB_BLACK	1
@@ -20,8 +21,6 @@
 
 # define rb_entry(ptr, type, member) \
 							container_of(ptr, type, member)
-
-typedef unsigned long long u64;
 
 struct rb_node
 {

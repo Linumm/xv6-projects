@@ -1,15 +1,15 @@
 #include "sched.h"
 
+
 // rbtree.c
 extern void rb_insert(struct rb_node*, struct rb_root*);
 extern void rb_delete(struct rb_node*, struct rb_root*);
 extern struct rb_node* rb_leftmost(struct rb_root*);
 
-// proc.c
-extern void yield(void);
 
 // console.c - to debug
 extern void cprintf(char*, ...);
+
 
 const int prio_to_weight[40] = {
   /* -20 */	88761,	71755,	56483,	46273,	36291,
@@ -29,7 +29,7 @@ const int prio_to_weight[40] = {
  * wmult = 2^32 / weight
  */
 const uint prio_to_wmult[40] = {
-  /* -20 */	    48388,	    59856,		76040,		92818,	   118348,
+  /* -20 */	    48388,	    59856,		  76040,  		92818,	   118348,
   /* -15 */	   147320,	   184698,	   229616,	   287308,	   360437,
   /* -10 */	   449829,	   563644,	   704093,	   875809,	  1099582,
   /*  -5 */	  1376151,	  1717300,	  2157191,	  2708050,	  3363326,
@@ -40,11 +40,41 @@ const uint prio_to_wmult[40] = {
 };
 
 
+/* ----- Load Weight modificatino ----- */
+static void
+update_qinv_weight(struct load_weight *lw)
+{
+  uint weight = lw->weight;
+
+  if (unlikely(!weight))
+    lw->inv_weight = WMULT_CONST;
+  else
+    lw->inv_weight = WMULT_CONST / weight;
+}
+
+
+void
+init_cfs_rq(struct cfs_rq* cfs_rq)
+{
+  cfs_rq->load.nice = 0;
+  cfs_rq->load.weight = 0;
+  cfs_rq->load.inv_weight = 0;
+
+  cfs_rq->nr_running = 0;
+  cfs_rq->min_vruntime = 0xFFFFFFFF; // 32-bit max uint
+  
+  cfs_rq->curr = 0;
+}
+
 /* ----- Runqueue modification ----- */
 void
 enqueue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
   if(!se) return;
+  if(se->on_rq) {
+    //cprintf("ENQ Fail: Already in RQ!\n");
+    return;
+  }
 
   struct rb_root *root = &cfs_rq->proc_timeline;
   struct rb_node *node = &se->run_node;
@@ -58,9 +88,8 @@ enqueue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
   cfs_rq->nr_running++;
   cfs_rq->load.weight += se->load.weight;
-  cfs_rq->load.inv_weight += se->load.inv_weight;
+  update_qinv_weight(&cfs_rq->load);
   cfs_rq->leftmost = rb_leftmost(root);
-  //cprintf("enq %d\n", cfs_rq->nr_running);
 }
 
 
@@ -68,6 +97,10 @@ void
 dequeue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
   if(!se) return;
+  if(!se->on_rq) {
+    //cprintf("DEQ Fail: Already out of RQ!\n");
+    return;
+  }
 
   struct rb_root *root = &cfs_rq->proc_timeline;
   struct rb_node *node = &se->run_node;
@@ -78,7 +111,7 @@ dequeue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
   
   cfs_rq->nr_running--;
   cfs_rq->load.weight -= se->load.weight;
-  cfs_rq->load.inv_weight -= se->load.inv_weight;
+  update_qinv_weight(&cfs_rq->load);
   cfs_rq->leftmost = rb_leftmost(root);
 }
 
@@ -86,24 +119,13 @@ dequeue_entity_fair(struct cfs_rq *cfs_rq, struct sched_entity *se)
 struct sched_entity*
 pick_entity_fair(struct cfs_rq *cfs_rq)
 {
-  if(!cfs_rq->leftmost)
-	return 0;
+  if(!cfs_rq->nr_running || !cfs_rq->leftmost) 
+	  return 0;
+  
   struct sched_entity *se = 0;
   se = se_entry(cfs_rq->leftmost, struct sched_entity, run_node);
 
   return se;
-}
-
-
-void
-check_tick(struct cfs_rq *cfs_rq, u64 us)
-{
-  /* Update current entity's sched stat */
-  update_entity_stat(cfs_rq, us);
-
-  /* Check preemption, yield condition then if so, yield */
-  if(cfs_rq->nr_running > 1 && check_yield(cfs_rq))
-	yield();
 }
 
 
@@ -112,7 +134,7 @@ u64
 calc_period(uint nr_running)
 {
   if(unlikely(nr_running > SCHED_NR_LATENCY))
-	return nr_running * SCHED_MIN_GRANULARITY;
+    return nr_running * SCHED_MIN_GRANULARITY;
   return SCHED_LATENCY_US;
 }
 
@@ -122,8 +144,9 @@ u64
 calc_delta(u64 delta_exec, uint weight, uint q_inv_weight)
 {
   int shift = 32; // WMULT_SHIFT
-  u64 delta = delta_exec * (weight * q_inv_weight);
 
+  u64 mult = (u64)weight * (u64)q_inv_weight;
+  u64 delta = delta_exec * mult;
   return (delta >> shift);
 }
 
@@ -137,6 +160,8 @@ calc_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
   slice = calc_delta(slice, se_weight, q_inv_weight);
 
+  if(ALLOW_LOG)
+    cprintf("\nw: %d, qinv: %d => slice: %d\n", se_weight, q_inv_weight, (uint)slice);
   return slice;
 }
 
@@ -144,7 +169,7 @@ calc_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 u64
 calc_delta_vslice(u64 delta, struct sched_entity *se)
 {
-   delta *= (NICE_0_WEIGHT / se->load.weight);
+  delta *= (NICE_0_WEIGHT / se->load.weight);
 
   return delta;
 }
@@ -153,7 +178,7 @@ calc_delta_vslice(u64 delta, struct sched_entity *se)
 /* ----- Updating proc's schedule stats in cfs_rq ----- */
 
 /*
- * Update current current running proc's sched entity data
+ * Update currently running proc's sched entity data
  * It is called from timer interrupt (every tick) with tick value
  */
 void
@@ -171,7 +196,7 @@ update_entity_stat(struct cfs_rq *cfs_rq, u64 us)
   curr->tot_exec_runtime += delta_exec;
   curr->vruntime += calc_delta_vslice(delta_exec, curr);
   
-  // update run_node's key
+  // update run_node's key - [NEED TO CHECK]
   struct rb_node *run_node = &curr->run_node;
   run_node->key = curr->vruntime;
 
@@ -192,11 +217,11 @@ update_min_vruntime(struct cfs_rq *cfs_rq)
   u64 vruntime = cfs_rq->min_vruntime;
   u64 new_min = vruntime;
 
-  if(curr) new_min = curr->vruntime;
+  if(curr)
+    new_min = curr->vruntime;
   if(leftmost) {
-	struct sched_entity *se;
-	se = rb_entry(leftmost, struct sched_entity, run_node);
-	new_min = min(new_min, se->vruntime);
+    struct sched_entity *se = rb_entry(leftmost, struct sched_entity, run_node);
+    new_min = min(new_min, se->vruntime);
   }
 
   cfs_rq->min_vruntime = max(vruntime, new_min);
@@ -211,33 +236,103 @@ check_yield(struct cfs_rq *cfs_rq)
 {
   /* If yield condition true ? 1 : 0 */
 
-  //cprintf("nr_run %d\n", cfs_rq->nr_running);
   struct sched_entity *curr = cfs_rq->curr;
   u64 runtime = curr->sum_exec_runtime;
 
   /* Ensure the min granularity */
   if(runtime < SCHED_MIN_GRANULARITY)
-	return 0;
+	  return 0;
 
   u64 ideal_runtime = calc_slice(cfs_rq, curr);
-  //cprintf("ideal_runtime: %d / %d\n", ideal_runtime, cfs_rq->nr_running);
- 
+
+  if(ALLOW_LOG) {
+    cprintf("runtime: %d, ideal: %d\n", (uint)runtime, (uint)ideal_runtime);
+    cprintf("vruntime: %d, nr: %d\n", (uint)curr->vruntime, cfs_rq->nr_running);
+  }
+
   /* if runtime over ideal runtime, yield */
-  if(runtime >= ideal_runtime)
-	return 1;
+  if(runtime >= ideal_runtime) {
+    if(ALLOW_LOG) cprintf("[OVER IDEAL RUNTIME]\n");
+	  return 1;
+  }
 
   struct sched_entity *leftmost = pick_entity_fair(cfs_rq);
-  u64 delta_vruntime = curr->vruntime - leftmost->vruntime;
+  signed long long delta_vruntime = (u64)curr->vruntime - (u64)leftmost->vruntime;
 
   /* if leftmost vruntime is smaller, yield */
-  if(delta_vruntime > 0)
-	return 1;
-
+  if(delta_vruntime > 0) {
+    if(ALLOW_LOG) cprintf("[SMALLER VRUNTIME FOUND]: %d\n", (uint)leftmost->vruntime);
+	  return 1;
+  }
 
   //if(delta_vruntime > ideal_runtime)
 	//return 1;
-
   return 0;
 }
 
 
+/* ----- sched_entity modification ----- */
+void
+init_entity(struct sched_entity *se)
+{
+  se->on_rq = 0;
+
+  // Default nice : 20
+  se->load.nice = 0;
+  se->load.weight = prio_to_weight[0+20];
+  se->load.inv_weight = prio_to_wmult[0+20];
+
+  se->run_node.__rb_parent_color = 0;
+  se->run_node.rb_right = 0;
+  se->run_node.rb_left = 0;
+
+  se->exec_start = 0;
+  se->sum_exec_runtime = 0;
+  se->vruntime = 0;
+  se->tot_exec_runtime = 0;
+}
+
+
+void
+copy_entity(struct sched_entity *pse, struct sched_entity *cse)
+{
+  struct cfs_rq *cfs_rq = pse->cfs_rq;
+  cse->on_rq = 0;
+
+  cse->load.nice = pse->load.nice;
+  cse->load.weight = pse->load.weight;
+  cse->load.inv_weight = pse->load.inv_weight;
+  cse->cfs_rq = cfs_rq; // affinity?
+
+  // Execute forked-child first
+  cse->exec_start = 0;
+  cse->sum_exec_runtime = 0;
+  cse->vruntime = cfs_rq->min_vruntime;
+  cse->tot_exec_runtime = 0;
+}
+
+
+void
+reset_entity(struct sched_entity *se, u64 us)
+{
+  // set exec_start as current time
+  // clear sum_exec_runtime of entity
+  se->exec_start = us;
+  se->sum_exec_runtime = 0;
+}
+
+
+int
+get_nice_entity(struct sched_entity *se)
+{
+  return se->load.nice;
+}
+
+
+void
+set_nice_entity(struct sched_entity *se, int nice)
+{
+  se->load.nice = nice;
+  se->load.weight = prio_to_weight[nice+20];
+  se->load.inv_weight = prio_to_wmult[nice+20];
+}

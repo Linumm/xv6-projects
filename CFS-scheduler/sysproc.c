@@ -89,3 +89,34 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+int
+sys_getnice(void)
+{
+  int nice = getnice();
+  return nice;
+}
+
+int
+sys_setnice(void)
+{
+  int nice;
+  if(argint(0, &nice) < 0)
+    return -1;
+
+  if(setnice(nice))
+    return 1;
+
+  return 0;
+}
+
+int
+sys_forknice(void)
+{
+  int nice;
+  if(argint(0, &nice) < 0)
+    return -1;
+
+  return forknice(nice);
+}

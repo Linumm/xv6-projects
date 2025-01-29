@@ -18,6 +18,8 @@
 # define SCHED_MIN_GRANULARITY	 3000
 # define SCHED_NR_LATENCY		(SCHED_LATENCY_US/SCHED_MIN_GRANULARITY)
 # define NICE_0_WEIGHT			1024
+# define WMULT_CONST        0xFFFFFFFF
+# define ALLOW_LOG          0
 
 # define se_entry(ptr, type, member) \
   				container_of(ptr, type, member)
@@ -29,19 +31,20 @@ extern const uint prio_to_wmult[40];
 
 struct load_weight
 {
-  uint					weight;
-  uint					inv_weight;
+  int nice;
+  uint weight;
+  uint inv_weight;
 };
 
 
 struct cfs_rq
 {
   struct load_weight	load;
-  int 					nr_running;
-  u64 					min_vruntime;
+  int                 nr_running;
+  u64                 min_vruntime;
 
-  struct rb_root		proc_timeline;
-  struct rb_node		*leftmost;
+  struct rb_root		  proc_timeline;
+  struct rb_node		  *leftmost;
   struct sched_entity	*curr;
 };
 
@@ -49,15 +52,15 @@ struct cfs_rq
 struct sched_entity
 {
   struct load_weight	load;
-  struct rb_node		run_node;
+  struct rb_node      run_node;
 
   u64					exec_start;
   u64					sum_exec_runtime;
   u64					tot_exec_runtime;
   u64					vruntime;
 
-  uint					on_rq;
-  struct cfs_rq			*cfs_rq;
+  uint              on_rq;
+  struct cfs_rq	    *cfs_rq;
 };
 
 
@@ -72,6 +75,6 @@ void 	update_entity_stat(struct cfs_rq*, u64);
 void 	update_min_vruntime(struct cfs_rq*);
 int 	check_yield(struct cfs_rq*);
 
-
+void  clear_entity_stat(struct sched_entity*, u64);
 
 #endif /* sched.h */

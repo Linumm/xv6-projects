@@ -6,6 +6,8 @@
 #include "user.h"
 
 #define N 1000
+#define N_CHILD 5
+#define N_WORK 1000000
 
 int j=0;
 
@@ -14,6 +16,7 @@ printf(int fd, const char *s, ...)
 {
   write(fd, s, strlen(s));
 }
+
 
 void
 forktest(void)

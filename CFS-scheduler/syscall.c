@@ -104,6 +104,11 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 
+extern int sys_getnice(void);
+extern int sys_setnice(void);
+extern int sys_forknice(void);
+
+
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
 [SYS_exit]    sys_exit,
@@ -126,6 +131,9 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_getnice]     sys_getnice,
+[SYS_setnice]     sys_setnice,
+[SYS_forknice]    sys_forknice,
 };
 
 void

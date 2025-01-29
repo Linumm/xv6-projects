@@ -24,6 +24,10 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 
+int getnice(void);
+int setnice(int);
+int forknice(int);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

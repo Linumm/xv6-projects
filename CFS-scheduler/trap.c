@@ -13,10 +13,12 @@ struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
-u64	us;	// micro second, 1tick == 1ms == 1,000us
+u64 us;
+/* TICR : 1 ns * 1 000 000 == 1,000 us 
+ * 1 tick == 1 ms == 1,000us
+ * uint limit : 4 294 967 s ~= 1 193 h (~= 49 days)
+ */
 
-// sched.c
-extern void check_tick(struct cfs_rq*, u64);
 
 void
 tvinit(void)
@@ -55,7 +57,7 @@ trap(struct trapframe *tf)
     if(cpuid() == 0){
       acquire(&tickslock);
       ticks++;
-	  us += 1000;
+	    us += 1000;
       wakeup(&ticks);
       release(&tickslock);
     }
@@ -109,11 +111,8 @@ trap(struct trapframe *tf)
   // If interrupts were on while locks held, would need to check nlock.
   if(myproc() && myproc()->state == RUNNING &&
      tf->trapno == T_IRQ0+IRQ_TIMER) {
-	
-	struct sched_entity *se = &myproc()->se;
-	struct cfs_rq *cfs_rq = se->cfs_rq;
-
-	check_tick(cfs_rq, us);
+    //check_tick(myproc(), us);
+    yield();
   }
 
   // Check if the process has been killed since we yielded
